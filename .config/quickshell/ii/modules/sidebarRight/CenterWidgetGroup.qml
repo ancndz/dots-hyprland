@@ -3,6 +3,7 @@ import qs.modules.common.widgets
 import qs.services
 import "./notifications"
 import "./volumeMixer"
+import "./vpns"
 import qs
 import Qt5Compat.GraphicalEffects
 import QtQuick
@@ -17,7 +18,8 @@ Rectangle {
     property int selectedTab: 0
     property var tabButtonList: [
         {"icon": "notifications", "name": Translation.tr("Notifications")},
-        {"icon": "volume_up", "name": Translation.tr("Audio")}
+        {"icon": "volume_up", "name": Translation.tr("Audio")},
+        {"icon": "vpn_lock", "name": Translation.tr("VPN")}
     ]
 
     Keys.onPressed: (event) => {
@@ -78,6 +80,7 @@ Rectangle {
 
             NotificationList {}
             VolumeMixer {}
+            VpnList {}
         }
     }
 }
