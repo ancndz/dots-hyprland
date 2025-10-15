@@ -91,6 +91,7 @@ Singleton {
             connectProc.exec(["nmcli", "connection", "up", connectionName]);
         }
         updateVpnTimer.restart();
+        updateVpnList();
     }
 
     Timer {
