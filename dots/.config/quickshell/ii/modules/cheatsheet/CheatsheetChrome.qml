@@ -3,12 +3,13 @@ import qs.services
 import qs.modules.common
 import qs.modules.common.widgets
 import qs.modules.common.functions
+import "chrome.js" as KeybindsData
 import QtQuick
 import QtQuick.Layouts
 
 Item {
     id: root
-    readonly property var keybinds: HyprlandKeybinds.keybinds
+    readonly property var keybinds: KeybindsData.keybinds
     property real spacing: 20
     property real titleSpacing: 7
     implicitWidth: rowLayout.implicitWidth
@@ -17,31 +18,30 @@ Item {
     property var keyBlacklist: ["Super_L"]
     property var keySubstitutions: ({
         "Super": "󰖳",
-        "mouse_up": "Scroll ↓",    // ikr, weird
-        "mouse_down": "Scroll ↑",  // trust me bro
+        "mouse_up": "Scroll ↓",
+        "mouse_down": "Scroll ↑",
         "mouse:272": "LMB",
         "mouse:273": "RMB",
         "mouse:275": "MouseBack",
         "Slash": "/",
         "Hash": "#",
         "Return": "Enter",
-        // "Shift": "",
     })
 
-    RowLayout { // Keybind columns
+    RowLayout {
         id: rowLayout
         spacing: root.spacing
         Repeater {
             model: keybinds.children
             
-            delegate: ColumnLayout { // Keybind sections
+            delegate: ColumnLayout {
                 spacing: root.spacing
                 required property var modelData
                 Layout.alignment: Qt.AlignTop
                 Repeater {
                     model: modelData.children
 
-                    delegate: Item { // Section with real keybinds
+                    delegate: Item {
                         required property var modelData
                         implicitWidth: sectionColumnLayout.implicitWidth
                         implicitHeight: sectionColumnLayout.implicitHeight
@@ -129,16 +129,12 @@ Item {
                                             }
                                         }
                                     }
-
                                 }
                             }
                         }
                     }
-
                 }
             }
-            
         }
     }
-    
 }

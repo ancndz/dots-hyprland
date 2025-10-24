@@ -1,3 +1,4 @@
+import qs
 import qs.services
 import qs.modules.common
 import qs.modules.common.widgets
@@ -17,6 +18,18 @@ Scope { // Scope
             "icon": "keyboard",
             "name": Translation.tr("Keybinds")
         },
+        {
+            "icon": "terminal",
+            "name": Translation.tr("Kitty")
+        },
+        {
+            "icon": "language",
+            "name": Translation.tr("Chrome")
+        },
+        //{
+        //   "icon": "folder",
+        //    "name": Translation.tr("Nautilus")
+        //},
         {
             "icon": "experiment",
             "name": Translation.tr("Elements")
@@ -73,7 +86,7 @@ Scope { // Scope
                 anchors.centerIn: parent
                 color: Appearance.colors.colLayer0
                 border.width: 1
-                border.color: Appearance.colors.colLayer0Border
+                border.color: Appearance.m3colors.m3outlineVariant
                 radius: Appearance.rounding.windowRounding
                 property real padding: 30
                 implicitWidth: cheatsheetColumnLayout.implicitWidth + padding * 2
@@ -183,6 +196,8 @@ Scope { // Scope
                         }
 
                         CheatsheetKeybinds {}
+                        CheatsheetKitty {}
+                        CheatsheetChrome {}
                         CheatsheetPeriodicTable {}
                     }
                 }
