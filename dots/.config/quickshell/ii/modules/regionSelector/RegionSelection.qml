@@ -5,18 +5,19 @@ import qs.modules.common.widgets
 import qs.services
 import QtQuick
 import QtQuick.Controls
+import Qt.labs.synchronizer
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Hyprland
-import Qt.labs.synchronizer
 
 PanelWindow {
     id: root
     visible: false
+    color: "transparent"
     WlrLayershell.namespace: "quickshell:regionSelector"
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand
     exclusionMode: ExclusionMode.Ignore
     anchors {
         left: true
@@ -26,12 +27,16 @@ PanelWindow {
     }
 
     // TODO: Ask: sidebar AI; Ocr: tesseract
-    enum SnipAction { Copy, Edit, Search, CharRecognition } 
+    enum SnipAction { Copy, Edit, Search, CharRecognition, Record, RecordWithSound } 
     enum SelectionMode { RectCorners, Circle }
     property var action: RegionSelection.SnipAction.Copy
     property var selectionMode: RegionSelection.SelectionMode.RectCorners
     signal dismiss()
     
+    property string saveScreenshotDir: Config.options.screenSnip.savePath !== ""
+                                       ? Config.options.screenSnip.savePath
+                                       : ""
+
     property string screenshotDir: Directories.screenshotTemp
     property string imageSearchEngineBaseUrl: Config.options.search.imageSearch.imageSearchEngineBaseUrl
     property string fileUploadApiEndpoint: "https://uguu.se/upload"
@@ -104,7 +109,6 @@ PanelWindow {
         });
         return offsetAdjustedLayers;
     }
-    property list<var> textRegions: []
 
     property bool isCircleSelection: (root.selectionMode === RegionSelection.SelectionMode.Circle)
     property bool enableWindowRegions: Config.options.regionSelector.targetRegions.windows && !isCircleSelection
@@ -121,10 +125,11 @@ PanelWindow {
         return (root.targetedRegionX >= 0 && root.targetedRegionY >= 0)
     }
     function setRegionToTargeted() {
-        root.regionX = root.targetedRegionX;
-        root.regionY = root.targetedRegionY;
-        root.regionWidth = root.targetedRegionWidth;
-        root.regionHeight = root.targetedRegionHeight;
+        const padding = Config.options.regionSelector.targetRegions.selectionPadding; // Make borders not cut off n stuff
+        root.regionX = root.targetedRegionX - padding;
+        root.regionY = root.targetedRegionY - padding;
+        root.regionWidth = root.targetedRegionWidth + padding * 2;
+        root.regionHeight = root.targetedRegionHeight + padding * 2;
     }
 
     function updateTargetedRegion(x, y) {
@@ -176,14 +181,34 @@ PanelWindow {
     property real regionY: Math.min(dragStartY, draggingY)
 
     Process {
-        id: screenshotProcess
+        id: screenshotProc
         running: true
         command: ["bash", "-c", `mkdir -p '${StringUtils.shellSingleQuoteEscape(root.screenshotDir)}' && grim -o '${StringUtils.shellSingleQuoteEscape(root.screen.name)}' '${StringUtils.shellSingleQuoteEscape(root.screenshotPath)}'`]
         onExited: (exitCode, exitStatus) => {
-            root.visible = true;
             if (root.enableContentRegions) imageDetectionProcess.running = true;
-            // if (root.action === RegionSelection.SnipAction.CharRecognition) ocrProc.running = true;
+            root.preparationDone = !checkRecordingProc.running;
         }
+    }
+    property bool isRecording: root.action === RegionSelection.SnipAction.Record || root.action === RegionSelection.SnipAction.RecordWithSound
+    property bool recordingShouldStop: false
+    Process {
+        id: checkRecordingProc
+        running: isRecording
+        command: ["pidof", "wf-recorder"]
+        onExited: (exitCode, exitStatus) => {
+            root.preparationDone = !screenshotProc.running
+            root.recordingShouldStop = (exitCode === 0);
+        }
+    }
+    property bool preparationDone: false
+    onPreparationDoneChanged: {
+        if (!preparationDone) return;
+        if (root.isRecording && root.recordingShouldStop) {
+            Quickshell.execDetached([Directories.recordScriptPath]);
+            root.dismiss();
+            return;
+        }
+        root.visible = true;
     }
 
     Process {
@@ -200,41 +225,6 @@ PanelWindow {
                     JSON.parse(imageDimensionCollector.text),
                     root.windowRegions
                 );
-            }
-        }
-    }
-
-    Process {
-        id: ocrProc
-        command: ["bash", "-c", `tesseract '${StringUtils.shellSingleQuoteEscape(root.screenshotPath)}' stdout tsv 2>/dev/null`]
-        stdout: StdioCollector {
-            id: outputCollector
-            onStreamFinished: {
-                // level	page_num	block_num	par_num	line_num	word_num	left	top	width	height	conf	text
-                const output = outputCollector.text
-                const lines = output.split("\n").slice(1) // Skip header
-                const filteredLines = lines.filter(line => (!line.trim().endsWith("-1")))
-                let regions = filteredLines.map(line => {
-                    const parts = line.split("\t")
-                    return ({
-                        "block_num": parseInt(parts[2]),
-                        "line_num": parseInt(parts[4]),
-                        "word_num": parseInt(parts[5]),
-                        "left": parseInt(parts[6]),
-                        "top": parseInt(parts[7]),
-                        "width": parseInt(parts[8]),
-                        "height": parseInt(parts[9]),
-                        "conf": parseInt(parts[10]),
-                        "text": parts.slice(11).join("\t")
-                    })
-                }).filter(region => {
-                    if (region === null) return false;
-                    // if (region.text.length <= 3 && region.text.replace(/[^a-zA-Z0-9]/g, "").length < region.text.length / 2) return false;
-                    // if (region.text.length < 2) return false;
-                    return true;
-                })
-                // print(`[Region Selector] OCR Regions: ${JSON.stringify(regions, null, 2)}`)
-                root.textRegions = regions;
             }
         }
     }
@@ -258,17 +248,38 @@ PanelWindow {
         }
 
         // Set command for action
+        const rx = Math.round(root.regionX * root.monitorScale);
+        const ry = Math.round(root.regionY * root.monitorScale);
+        const rw = Math.round(root.regionWidth * root.monitorScale);
+        const rh = Math.round(root.regionHeight * root.monitorScale);
         const cropBase = `magick ${StringUtils.shellSingleQuoteEscape(root.screenshotPath)} `
-            + `-crop ${root.regionWidth * root.monitorScale}x${root.regionHeight * root.monitorScale}+${root.regionX * root.monitorScale}+${root.regionY * root.monitorScale}`
+            + `-crop ${rw}x${rh}+${rx}+${ry}`
         const cropToStdout = `${cropBase} -`
         const cropInPlace = `${cropBase} '${StringUtils.shellSingleQuoteEscape(root.screenshotPath)}'`
         const cleanup = `rm '${StringUtils.shellSingleQuoteEscape(root.screenshotPath)}'`
+        const slurpRegion = `${rx},${ry} ${rw}x${rh}`
         const uploadAndGetUrl = (filePath) => {
             return `curl -sF files[]=@'${StringUtils.shellSingleQuoteEscape(filePath)}' ${root.fileUploadApiEndpoint} | jq -r '.files[0].url'`
         }
         switch (root.action) {
             case RegionSelection.SnipAction.Copy:
-                snipProc.command = ["bash", "-c", `${cropToStdout} | wl-copy && ${cleanup}`]
+                if (saveScreenshotDir === "") {
+                    // not saving the screenshot, just copy to clipboard
+                    snipProc.command = ["bash", "-c", `${cropToStdout} | wl-copy && ${cleanup}`]
+                    break;
+                }
+
+                const savePathBase = root.saveScreenshotDir
+
+                snipProc.command = [
+                    "bash", "-c",
+                    `mkdir -p '${StringUtils.shellSingleQuoteEscape(savePathBase)}' && \
+                    saveFileName="screenshot-$(date '+%Y-%m-%d_%H.%M.%S').png" && \
+                    savePath="${savePathBase}/$saveFileName" && \
+                    ${cropToStdout} | tee >(wl-copy) > "$savePath" && \
+                    ${cleanup}`
+                ]
+
                 break;
             case RegionSelection.SnipAction.Edit:
                 snipProc.command = ["bash", "-c", `${cropToStdout} | swappy -f - && ${cleanup}`]
@@ -278,6 +289,12 @@ PanelWindow {
                 break;
             case RegionSelection.SnipAction.CharRecognition:
                 snipProc.command = ["bash", "-c", `${cropInPlace} && tesseract '${StringUtils.shellSingleQuoteEscape(root.screenshotPath)}' stdout -l $(tesseract --list-langs | awk 'NR>1{print $1}' | tr '\\n' '+' | sed 's/\\+$/\\n/') | wl-copy && ${cleanup}`]
+                break;
+            case RegionSelection.SnipAction.Record:
+                snipProc.command = ["bash", "-c", `${Directories.recordScriptPath} --region '${slurpRegion}'`]
+                break;
+            case RegionSelection.SnipAction.RecordWithSound:
+                snipProc.command = ["bash", "-c", `${Directories.recordScriptPath} --region '${slurpRegion}' --sound`]
                 break;
             default:
                 console.warn("[Region Selector] Unknown snip action, skipping snip.");
@@ -450,35 +467,9 @@ PanelWindow {
                 }
             }
 
-            // OCR text regions
-            // Repeater {
-            //     model: ScriptModel {
-            //         values: root.textRegions
-            //     }
-            //     delegate: Rectangle {
-            //         id: textRegionItem
-            //         z: 5
-            //         required property var modelData
-            //         property real padding: 4
-            //         color: ColorUtils.transparentize(Appearance.colors.colTooltip, 0.3)
-            //         radius: 6
-            //         x: modelData.left - padding
-            //         y: modelData.top - padding
-            //         width: modelData.width + padding
-            //         height: modelData.height + padding
-
-            //         StyledText {
-            //             font.pixelSize: Appearance.font.pixelSize.smallie
-            //             anchors.centerIn: parent
-            //             text: textRegionItem.modelData.text
-            //             color: ColorUtils.transparentize(Appearance.colors.colOnTooltip, 0.2)
-            //         }
-            //     }
-            // }
-
-            // Options toolbar
-            OptionsToolbar {
-                id: toolbar
+            // Controls
+            Row {
+                id: regionSelectionControls
                 z: 9999
                 anchors {
                     horizontalCenter: parent.horizontalCenter
@@ -490,8 +481,8 @@ PanelWindow {
                     target: root
                     function onVisibleChanged() {
                         if (!visible) return;
-                        toolbar.anchors.bottomMargin = 8;
-                        toolbar.opacity = 1;
+                        regionSelectionControls.anchors.bottomMargin = 8;
+                        regionSelectionControls.opacity = 1;
                     }
                 }
                 Behavior on opacity {
@@ -500,14 +491,43 @@ PanelWindow {
                 Behavior on anchors.bottomMargin {
                     animation: Appearance.animation.elementMove.numberAnimation.createObject(this)
                 }
+                spacing: 6
 
-                Synchronizer on action {
-                    property alias source: root.action
+                OptionsToolbar {
+                    Synchronizer on action {
+                        property alias source: root.action
+                    }
+                    Synchronizer on selectionMode {
+                        property alias source: root.selectionMode
+                    }
+                    onDismiss: root.dismiss();
                 }
-                Synchronizer on selectionMode {
-                    property alias source: root.selectionMode
+                Item {
+                    anchors {
+                        verticalCenter: parent.verticalCenter
+                    }
+                    implicitWidth: closeFab.implicitWidth
+                    implicitHeight: closeFab.implicitHeight
+                    StyledRectangularShadow {
+                        target: closeFab
+                        radius: closeFab.buttonRadius
+                    }
+                    FloatingActionButton {
+                        id: closeFab
+                        baseSize: 48
+                        iconText: "close"
+                        onClicked: root.dismiss();
+                        StyledToolTip {
+                            text: Translation.tr("Close")
+                        }
+                        colBackground: Appearance.colors.colTertiaryContainer
+                        colBackgroundHover: Appearance.colors.colTertiaryContainerHover
+                        colRipple: Appearance.colors.colTertiaryContainerActive
+                        colOnBackground: Appearance.colors.colOnTertiaryContainer
+                    }
                 }
             }
+            
         }
     }
 }
