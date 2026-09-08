@@ -212,6 +212,11 @@ Singleton {
                 }
                 property string wallpaperPath: ""
                 property string thumbnailPath: ""
+                property JsonObject slideshow: JsonObject {
+                    property bool enabled: false
+                    property string folder: "" // user's wallpaper folder
+                    property string schedule: "0 * * * *" // cron expr or @reboot
+                }
                 property bool hideWhenFullscreen: true
                 property JsonObject parallax: JsonObject {
                     property bool vertical: false

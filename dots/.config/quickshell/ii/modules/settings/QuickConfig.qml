@@ -227,6 +227,103 @@ ContentPage {
     }
 
     ContentSection {
+        icon: "photo_library"
+        title: Translation.tr("Slideshow")
+        Layout.fillWidth: true
+
+        ConfigSwitch {
+            buttonIcon: "slideshow"
+            text: Translation.tr("Enable wallpaper slideshow")
+            checked: Config.options.background.slideshow.enabled
+            onCheckedChanged: {
+                Config.options.background.slideshow.enabled = checked;
+                const cron = Config.options.background.slideshow.schedule;
+                Quickshell.execDetached(["bash", "-c",
+                    `${Directories.scriptPath}/colors/slideshow-cron.sh ${checked ? `install "${cron}"` : "uninstall"}`
+                ]);
+            }
+        }
+
+        ConfigSelectionArray {
+            currentValue: Config.options.background.slideshow.schedule
+            onSelected: newValue => {
+                Config.options.background.slideshow.schedule = newValue;
+                if (Config.options.background.slideshow.enabled) {
+                    Quickshell.execDetached(["bash", "-c",
+                        `${Directories.scriptPath}/colors/slideshow-cron.sh install "${newValue}"`
+                    ]);
+                }
+            }
+            options: [
+                {
+                    displayName: Translation.tr("Every hour"),
+                    value: "0 * * * *"
+                },
+                {
+                    displayName: Translation.tr("Every day"),
+                    value: "0 9 * * *"
+                },
+                {
+                    displayName: Translation.tr("On boot"),
+                    value: "@reboot"
+                }
+            ]
+        }
+
+        MaterialTextField {
+            Layout.fillWidth: true
+            placeholderText: Translation.tr("Custom cron expression (e.g. */30 * * * *)")
+            text: Config.options.background.slideshow.schedule
+            onEditingFinished: {
+                Config.options.background.slideshow.schedule = text;
+                if (Config.options.background.slideshow.enabled) {
+                    Quickshell.execDetached(["bash", "-c",
+                        `${Directories.scriptPath}/colors/slideshow-cron.sh install "${text}"`
+                    ]);
+                }
+            }
+        }
+
+        ConfigRow {
+            Layout.fillWidth: true
+            uniform: true
+            RippleButtonWithIcon {
+                Layout.fillWidth: true
+                buttonRadius: Appearance.rounding.small
+                materialIcon: "folder_open"
+                mainText: Translation.tr("Choose folder")
+                onClicked: {
+                    Quickshell.execDetached(
+                        `${Directories.scriptPath}/colors/slideshow-setup.sh pick-folder`
+                    );
+                }
+            }
+            RippleButtonWithIcon {
+                Layout.fillWidth: true
+                buttonRadius: Appearance.rounding.small
+                materialIcon: "add_photo_alternate"
+                mainText: Translation.tr("Add images")
+                onClicked: {
+                    Quickshell.execDetached(
+                        `${Directories.scriptPath}/colors/slideshow-setup.sh add-images`
+                    );
+                }
+            }
+        }
+
+        StyledText {
+            Layout.fillWidth: true
+            text: Config.options.background.slideshow.folder
+                ? Translation.tr("Folder: %1").arg(Config.options.background.slideshow.folder)
+                : Translation.tr("No slideshow folder selected yet")
+            color: Appearance.colors.colOnSurfaceVariant
+            font.pixelSize: Appearance.font.pixelSize.small
+            elide: Text.ElideMiddle
+            wrapMode: Text.Wrap
+        }
+    }
+
+    ContentSection {
         icon: "screenshot_monitor"
         title: Translation.tr("Bar & screen")
 
