@@ -1,4 +1,5 @@
 import qs.modules.common
+import qs.modules.common.models
 import qs.modules.common.widgets
 import qs.services
 import QtQuick
@@ -8,8 +9,11 @@ StyledPopup {
     id: root
     property string formattedDate: Qt.locale().toString(DateTime.clock.date, "dddd, MMMM dd, yyyy")
     property string formattedTime: DateTime.time
-    property string formattedUptime: DateTime.uptime
     property string todosSection: getUpcomingTodos()
+
+    property Uptime uptime: Uptime {
+        active: root.active
+    }
 
     function getUpcomingTodos() {
         const unfinishedTodos = Todo.list.filter(function (item) {
@@ -45,7 +49,7 @@ StyledPopup {
         StyledPopupValueRow {
             icon: "timelapse"
             label: Translation.tr("System uptime:")
-            value: root.formattedUptime
+            value: root.uptime.text
         }
 
         // Tasks

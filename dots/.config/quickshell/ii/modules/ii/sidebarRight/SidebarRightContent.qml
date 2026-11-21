@@ -1,6 +1,7 @@
 import qs
 import qs.services
 import qs.modules.common
+import qs.modules.common.models
 import qs.modules.common.widgets
 import QtQuick
 import QtQuick.Controls
@@ -28,6 +29,11 @@ Item {
     property bool showNightLightDialog: false
     property bool showWifiDialog: false
     property bool editMode: false
+
+    Uptime {
+        id: uptime
+        active: GlobalStates.sidebarRightOpen
+    }
 
     Connections {
         target: GlobalStates
@@ -239,7 +245,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     font.pixelSize: Appearance.font.pixelSize.normal
                     color: Appearance.colors.colOnLayer0
-                    text: Translation.tr("Up %1").arg(DateTime.uptime)
+                    text: Translation.tr("Up %1").arg(uptime.text)
                     textFormat: Text.MarkdownText
                 }
             }
