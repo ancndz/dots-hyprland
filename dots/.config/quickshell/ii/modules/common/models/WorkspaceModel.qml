@@ -21,9 +21,7 @@ NestableObject {
 
     property list<bool> occupied: []
     property list<var> biggestWindow: occupied.map((_, index) => {
-        const wsId = getWorkspaceIdAt(index);
-        var biggestWindow = HyprlandData.biggestWindowForWorkspace(wsId);
-        return biggestWindow;
+        return HyprlandData.biggestWindowForWorkspace(getWorkspaceIdAt(index));
     })
 
     function getWorkspaceId(group, index) {

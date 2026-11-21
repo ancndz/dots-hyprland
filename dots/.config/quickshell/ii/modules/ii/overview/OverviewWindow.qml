@@ -1,5 +1,4 @@
 pragma ComponentBehavior: Bound
-import qs
 import qs.services
 import qs.modules.common
 import qs.modules.common.functions
@@ -93,7 +92,7 @@ Item { // Window
     ScreencopyView {
         id: windowPreview
         anchors.fill: parent
-        captureSource: GlobalStates.overviewOpen ? root.toplevel : null
+        captureSource: root.visible ? root.toplevel : null
         live: true
 
         // Color overlay for interactions
