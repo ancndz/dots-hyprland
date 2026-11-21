@@ -47,8 +47,13 @@ Singleton {
     }
 
     function refresh() {
-        readProc.buffer = []
-        readProc.running = true
+        if (readProc.running) {
+            readProc.refreshPending = true;
+            return;
+        }
+        readProc.refreshPending = false;
+        readProc.buffer = [];
+        readProc.running = true;
     }
 
     function copy(entry) {
@@ -110,31 +115,25 @@ Singleton {
         wipeProc.running = true;
     }
 
-    Connections {
-        target: Quickshell
-        function onClipboardTextChanged() {
-            delayedUpdateTimer.restart()
-        }
-    }
-
-    Timer {
-        id: delayedUpdateTimer
-        interval: Config.options.hacks.arbitraryRaceConditionDelay
-        repeat: false
-        onTriggered: {
-            root.refresh()
-        }
-    }
-
     Process {
         id: readProc
         property list<string> buffer: []
+        property bool refreshPending: false
 
         command: [root.cliphistBinary, "list"]
 
         stdout: SplitParser {
             onRead: (line) => {
                 readProc.buffer.push(line)
+            }
+        }
+
+        onRunningChanged: {
+            if (!readProc.running && readProc.refreshPending) {
+                Qt.callLater(() => {
+                    if (readProc.refreshPending)
+                        root.refresh();
+                });
             }
         }
 
@@ -150,6 +149,7 @@ Singleton {
     IpcHandler {
         target: "cliphistService"
 
+        // The Hyprland clipboard watchers call this after storing text or images.
         function update(): void {
             root.refresh()
         }
