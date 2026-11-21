@@ -2,6 +2,7 @@ pragma Singleton
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import qs
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -15,6 +16,7 @@ Singleton {
     property var windowList: []
     property var addresses: []
     property var windowByAddress: ({})
+    property var biggestWindowByWorkspace: ({})
     property var workspaces: []
     property var workspaceIds: []
     property var workspaceById: ({})
@@ -44,123 +46,203 @@ Singleton {
         return root.windowByAddress[address];
     }
 
-    // Internals
-
-    function updateWindowList() {
-        getClients.running = true;
-    }
-
-    function updateLayers() {
-        getLayers.running = true;
-    }
-
-    function updateMonitors() {
-        getMonitors.running = true;
-    }
-
-    function updateWorkspaces() {
-        getWorkspaces.running = true;
-        getActiveWorkspace.running = true;
-    }
-
-    function updateAll() {
-        updateWindowList();
-        updateMonitors();
-        updateLayers();
-        updateWorkspaces();
-    }
-
     function biggestWindowForWorkspace(workspaceId) {
-        const windowsInThisWorkspace = HyprlandData.windowList.filter(w => w.workspace.id == workspaceId);
-        return windowsInThisWorkspace.reduce((maxWin, win) => {
-            const maxArea = (maxWin?.size?.[0] ?? 0) * (maxWin?.size?.[1] ?? 0);
-            const winArea = (win?.size?.[0] ?? 0) * (win?.size?.[1] ?? 0);
-            return winArea > maxArea ? win : maxWin;
-        }, null);
+        return root.biggestWindowByWorkspace[workspaceId] ?? null;
+    }
+
+    // Collect related events in one batch. Starting an active timer leaves the deadline intact.
+    property var pendingQueries: new Set()
+
+    function queueRefresh(...queries) {
+        for (const query of queries)
+            root.pendingQueries.add(query);
+        refreshTimer.start();
+    }
+
+    Timer {
+        id: refreshTimer
+        interval: 40
+        onTriggered: {
+            const queries = root.pendingQueries;
+            root.pendingQueries = new Set();
+            for (const query of queries)
+                query.refresh();
+        }
     }
 
     Component.onCompleted: {
-        updateAll();
+        queueRefresh(getClients, getMonitors, getWorkspaces, getActiveWorkspace);
+        if (GlobalStates.regionSelectorOpen)
+            queueRefresh(getLayers);
+    }
+
+    Connections {
+        target: GlobalStates
+
+        function onOverviewOpenChanged() {
+            // Geometry-only changes, such as resizing a window, may not emit an IPC event.
+            if (GlobalStates.overviewOpen)
+                root.queueRefresh(getClients, getMonitors);
+        }
+
+        function onRegionSelectorOpenChanged() {
+            if (GlobalStates.regionSelectorOpen)
+                root.queueRefresh(getClients, getLayers);
+        }
     }
 
     Connections {
         target: Hyprland
 
         function onRawEvent(event) {
-            // console.log("Hyprland raw event:", event.name);
-            if (["openlayer", "closelayer", "screencast"].includes(event.name)) return;
-            updateAll()
+            switch (event.name) {
+            case "openwindow":
+            case "closewindow":
+            case "movewindow":
+            case "movewindowv2":
+            case "fullscreen":
+            case "minimized":
+                root.queueRefresh(getClients, getWorkspaces);
+                break;
+            case "activewindow":
+            case "activewindowv2":
+            case "windowtitle":
+            case "windowtitlev2":
+            case "changefloatingmode":
+            case "togglegroup":
+            case "moveintogroup":
+            case "moveoutofgroup":
+            case "pin":
+                root.queueRefresh(getClients);
+                break;
+            case "focusedmon":
+            case "focusedmonv2":
+                root.queueRefresh(getClients, getActiveWorkspace);
+                break;
+            case "workspace":
+            case "workspacev2":
+            case "activespecial":
+            case "activespecialv2":
+                root.queueRefresh(getClients, getMonitors, getActiveWorkspace);
+                break;
+            case "createworkspace":
+            case "createworkspacev2":
+            case "destroyworkspace":
+            case "destroyworkspacev2":
+            case "renameworkspace":
+            case "moveworkspace":
+            case "moveworkspacev2":
+            case "monitoradded":
+            case "monitoraddedv2":
+            case "monitorremoved":
+            case "configreloaded":
+                root.queueRefresh(getClients, getMonitors, getWorkspaces, getActiveWorkspace);
+                break;
+            case "openlayer":
+            case "closelayer":
+                if (GlobalStates.regionSelectorOpen)
+                    root.queueRefresh(getLayers);
+                if (GlobalStates.overviewOpen)
+                    root.queueRefresh(getMonitors);
+                break;
+            }
         }
     }
 
-    Process {
+    component HyprlandQuery: Process {
+        id: query
+        required property string request
+        property bool refreshPending: false
+        signal received(var data)
+
+        command: ["hyprctl", "-j", request]
+
+        function refresh() {
+            if (query.running) {
+                query.refreshPending = true;
+                return;
+            }
+            query.refreshPending = false;
+            query.running = true;
+        }
+
+        stdout: StdioCollector { id: collector }
+
+        onExited: (exitCode, exitStatus) => {
+            if (exitCode !== 0 || exitStatus !== 0) {
+                console.warn("[HyprlandData] Failed to query", query.request, exitCode, exitStatus);
+                return;
+            }
+            let data;
+            try {
+                data = JSON.parse(collector.text);
+            } catch (error) {
+                console.warn("[HyprlandData] Invalid response for", query.request, error);
+                return;
+            }
+            query.received(data);
+        }
+
+        onRunningChanged: {
+            if (!query.running && query.refreshPending) {
+                Qt.callLater(() => {
+                    if (query.refreshPending)
+                        query.refresh();
+                });
+            }
+        }
+    }
+
+    HyprlandQuery {
         id: getClients
-        command: ["hyprctl", "clients", "-j"]
-        stdout: StdioCollector {
-            id: clientsCollector
-            onStreamFinished: {
-                root.windowList = JSON.parse(clientsCollector.text)
-                let tempWinByAddress = {};
-                for (var i = 0; i < root.windowList.length; ++i) {
-                    var win = root.windowList[i];
-                    tempWinByAddress[win.address] = win;
+        request: "clients"
+        onReceived: windows => {
+            const windowsByAddress = {};
+            const biggestByWorkspace = {};
+            const areaByWorkspace = {};
+            for (const window of windows) {
+                windowsByAddress[window.address] = window;
+                const workspace = window.workspace.id;
+                const area = (window.size?.[0] ?? 0) * (window.size?.[1] ?? 0);
+                if (area > (areaByWorkspace[workspace] ?? 0)) {
+                    areaByWorkspace[workspace] = area;
+                    biggestByWorkspace[workspace] = window;
                 }
-                root.windowByAddress = tempWinByAddress;
-                root.addresses = root.windowList.map(win => win.address);
             }
+            root.windowList = windows;
+            root.windowByAddress = windowsByAddress;
+            root.biggestWindowByWorkspace = biggestByWorkspace;
+            root.addresses = Object.keys(windowsByAddress);
         }
     }
 
-    Process {
+    HyprlandQuery {
         id: getMonitors
-        command: ["hyprctl", "monitors", "-j"]
-        stdout: StdioCollector {
-            id: monitorsCollector
-            onStreamFinished: {
-                root.monitors = JSON.parse(monitorsCollector.text);
-            }
-        }
+        request: "monitors"
+        onReceived: data => root.monitors = data
     }
 
-    Process {
+    HyprlandQuery {
         id: getLayers
-        command: ["hyprctl", "layers", "-j"]
-        stdout: StdioCollector {
-            id: layersCollector
-            onStreamFinished: {
-                root.layers = JSON.parse(layersCollector.text);
-            }
-        }
+        request: "layers"
+        onReceived: data => root.layers = data
     }
 
-    Process {
+    HyprlandQuery {
         id: getWorkspaces
-        command: ["hyprctl", "workspaces", "-j"]
-        stdout: StdioCollector {
-            id: workspacesCollector
-            onStreamFinished: {
-                var rawWorkspaces = JSON.parse(workspacesCollector.text);
-                // Filter out invalid workspace ids (e.g. lock-screen temp workspace 2147483647 - N)
-                root.workspaces = rawWorkspaces.filter(ws => ws.id >= 1 && ws.id <= 100);
-                let tempWorkspaceById = {};
-                for (var i = 0; i < root.workspaces.length; ++i) {
-                    var ws = root.workspaces[i];
-                    tempWorkspaceById[ws.id] = ws;
-                }
-                root.workspaceById = tempWorkspaceById;
-                root.workspaceIds = root.workspaces.map(ws => ws.id);
-            }
+        request: "workspaces"
+        onReceived: data => {
+            // Filter out invalid workspace ids (e.g. temporary lock-screen workspaces).
+            const workspaces = data.filter(ws => ws.id >= 1 && ws.id <= 100);
+            root.workspaces = workspaces;
+            root.workspaceById = Object.fromEntries(workspaces.map(ws => [ws.id, ws]));
+            root.workspaceIds = workspaces.map(ws => ws.id);
         }
     }
 
-    Process {
+    HyprlandQuery {
         id: getActiveWorkspace
-        command: ["hyprctl", "activeworkspace", "-j"]
-        stdout: StdioCollector {
-            id: activeWorkspaceCollector
-            onStreamFinished: {
-                root.activeWorkspace = JSON.parse(activeWorkspaceCollector.text);
-            }
-        }
+        request: "activeworkspace"
+        onReceived: data => root.activeWorkspace = data
     }
 }
