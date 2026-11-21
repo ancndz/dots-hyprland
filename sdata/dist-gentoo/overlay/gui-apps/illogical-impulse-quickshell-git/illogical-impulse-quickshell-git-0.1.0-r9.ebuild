@@ -5,11 +5,11 @@ EAPI=8
 
 inherit cmake toolchain-funcs
 
-COMMIT="7511545ee20664e3b8b8d3322c0ffe7567c56f7a"
+COMMIT="9b0f339b19057f4731bf3b48293307d7ef241671"
 
 DESCRIPTION="Toolkit for building desktop widgets using QtQuick"
 HOMEPAGE="https://quickshell.org/"
-SRC_URI="https://github.com/quickshell-mirror/quickshell/archive/${COMMIT}.tar.gz -> ${P}.tar.gz"
+SRC_URI="https://github.com/quickshell-mirror/quickshell/archive/${COMMIT}.tar.gz -> ${P}-${COMMIT}.tar.gz"
 S="${WORKDIR}/quickshell-${COMMIT}"
 
 LICENSE="LGPL-3"
