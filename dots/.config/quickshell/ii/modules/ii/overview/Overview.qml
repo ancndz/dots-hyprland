@@ -102,40 +102,56 @@ Scope {
                 }
             }
 
-            Loader {
+            Column {
+                id: appPanels
                 anchors.horizontalCenter: parent.horizontalCenter
-                active: GlobalStates.overviewOpen && Config.options.dock.showInOverview
-                    && panelWindow.searchingText.length === 0 && TaskbarApps.apps.length > 0
-                visible: active
 
-                sourceComponent: Item {
-                    implicitWidth: Math.min(panelWindow.width, overviewDockApps.implicitWidth + 2 * (Appearance.sizes.elevationMargin + overviewDockApps.buttonPadding))
-                    implicitHeight: Config.options.dock.height + Appearance.sizes.elevationMargin + Appearance.sizes.hyprlandGapsOut
+                readonly property bool showDock: Config.options.dock.showInOverview && TaskbarApps.apps.length > 0
+                readonly property bool showFrequentApps: Config.options.search.showFrequentApps && frequentApps.apps.length > 0
+                visible: panelWindow.searchingText.length === 0 && (showDock || showFrequentApps)
 
-                    StyledRectangularShadow {
-                        target: dockBackground
+                Loader {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    active: GlobalStates.overviewOpen && appPanels.visible && appPanels.showDock
+                    visible: active
+
+                    sourceComponent: Item {
+                        implicitWidth: Math.min(panelWindow.width, overviewDockApps.implicitWidth + 2 * (Appearance.sizes.elevationMargin + overviewDockApps.buttonPadding))
+                        implicitHeight: Config.options.dock.height + Appearance.sizes.elevationMargin + Appearance.sizes.hyprlandGapsOut
+
+                        StyledRectangularShadow {
+                            target: dockBackground
+                        }
+
+                        Rectangle {
+                            id: dockBackground
+                            anchors.fill: parent
+                            anchors.margins: Appearance.sizes.elevationMargin
+                            anchors.bottomMargin: Appearance.sizes.hyprlandGapsOut
+                            color: Appearance.colors.colLayer0
+                            border.width: 1
+                            border.color: Appearance.colors.colLayer0Border
+                            radius: Appearance.rounding.large
+                        }
+
+                        DockApps {
+                            id: overviewDockApps
+                            anchors.fill: parent
+                            anchors.leftMargin: Appearance.sizes.elevationMargin + buttonPadding
+                            anchors.rightMargin: anchors.leftMargin
+                            anchors.topMargin: Appearance.sizes.hyprlandGapsOut
+                            inOverview: true
+                            onAppActivated: GlobalStates.overviewOpen = false
+                        }
                     }
+                }
 
-                    Rectangle {
-                        id: dockBackground
-                        anchors.fill: parent
-                        anchors.margins: Appearance.sizes.elevationMargin
-                        anchors.bottomMargin: Appearance.sizes.hyprlandGapsOut
-                        color: Appearance.colors.colLayer0
-                        border.width: 1
-                        border.color: Appearance.colors.colLayer0Border
-                        radius: Appearance.rounding.large
-                    }
-
-                    DockApps {
-                        id: overviewDockApps
-                        anchors.fill: parent
-                        anchors.leftMargin: Appearance.sizes.elevationMargin + buttonPadding
-                        anchors.rightMargin: anchors.leftMargin
-                        anchors.topMargin: Appearance.sizes.hyprlandGapsOut
-                        inOverview: true
-                        onAppActivated: GlobalStates.overviewOpen = false
-                    }
+                FrequentAppsStrip {
+                    id: frequentApps
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    availableWidth: panelWindow.width
+                    visible: appPanels.showFrequentApps
+                    onAppOpened: GlobalStates.overviewOpen = false
                 }
             }
         }
